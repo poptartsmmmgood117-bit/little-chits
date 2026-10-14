@@ -360,8 +360,8 @@ class World:
         return None
 
     # ------------------------------------------------------------------ contact between islands (T30)
-    def depart(self, a: Agent) -> None:
-        """A chit sails away. It leaves this world (not a death) and is at sea for half a day."""
+    def depart(self, a: Agent, ship: str = "boat") -> None:
+        """A chit sails away. It leaves this world (not a death) and is at sea for half a day (less in a longship)."""
         self.agents.pop(a.id, None)
         bel = self.beliefs.get(a.belief)
         if bel and a.id in bel["followers"]:
@@ -376,9 +376,10 @@ class World:
             a.voyage_home, a.home_id = a.home or "", a.id
         carried = {k: self.inventions[k] for k in self.inventions
                    if a.inventory.get(k) or f"recipe:{k}" in a.knows}
-        self.outbox.append({"agent": a.to_dict(), "from": self.id, "arrive_tick": self.tick + BLD.voyage_ticks(self),
+        self.outbox.append({"agent": a.to_dict(), "from": self.id, "arrive_tick": self.tick + BLD.voyage_ticks(self, ship),
                             "inventions": carried})
-        self.emit("voyage", f"{a.name} sailed away over the sea", 5, a.id, a.x, a.y)
+        self.emit("voyage", f"{a.name} sailed away over the sea" + (" in a longship" if ship == "longship" else ""), 5,
+                  a.id, a.x, a.y, ship=ship)
 
     def arrive(self, agent_dict: Dict[str, Any], from_world_id: str, from_name: str = "",
                inventions: Optional[Dict[str, Any]] = None) -> Agent:
@@ -417,11 +418,13 @@ class World:
         return a
 
     def _beach_boat(self, a: Agent) -> Optional[Structure]:
-        """A trader home again draws the boat it sailed in up on the shore where it landed: the village keeps it."""
-        spot = self.find_site("boat", a.x, a.y, 7, reach=(a.x, a.y))
+        """A trader (or raider) home again draws the boat or longship it sailed in up on the shore where it landed: the
+        village keeps it."""
+        ship = "longship" if a.stats.pop("longship_abroad", 0) else "boat"
+        spot = self.find_site(ship, a.x, a.y, 7, reach=(a.x, a.y))
         if spot is None:
             return None
-        b = self.place_site("boat", spot[0], spot[1], a)
+        b = self.place_site(ship, spot[0], spot[1], a)
         b.complete, b.completed, b.needs, b.work_done = True, self.tick, {}, b.work_total
         return b
 
@@ -1187,8 +1190,8 @@ class World:
         across a river was chosen 8 tiles away and 140 on foot, and chits failed to reach it 1,684 times."""
         d = DESIGNS[design]
         w, h = d.size
-        margin = 0 if design in ("road", "boat") else 1
-        if design in ("boat", "lighthouse", "harbour"):
+        margin = 0 if design in ("road", "boat", "longship") else 1
+        if design in ("boat", "longship", "lighthouse", "harbour"):
             radius = max(radius, 60)  # the shore may be a long walk from the village
         if design == "sand_pit":
             radius = max(radius, 30)  # the nearest shore or riverbank
@@ -1200,7 +1203,7 @@ class World:
         for dy in range(-radius, radius + 1):
             for dx in range(-radius, radius + 1):
                 nx, ny = x + dx, y + dy
-                if design in ("boat", "lighthouse", "sand_pit", "harbour") and not self.coastal(nx, ny):
+                if design in ("boat", "longship", "lighthouse", "sand_pit", "harbour") and not self.coastal(nx, ny):
                     continue
                 if design == "mine" and not self.near_rock(nx, ny, w, h):
                     continue
