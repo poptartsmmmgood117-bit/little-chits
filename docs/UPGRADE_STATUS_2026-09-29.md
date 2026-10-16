@@ -268,6 +268,23 @@ until someone has discovered a sail.
 Not yet: crews (several chits in one longship), battles between ships at sea, instinct that raises runestones or
 prays at them, and a run with models in a versus game.
 
+## Seventh pass (2026-10-16): crews and berserkers
+
+| Piece | What it does | Tests |
+|---|---|---|
+| Longship crews | `{"do":"sail","intent":"raid","crew":["<name>",...]}` or `"crew":"auto"` (instinct raids use auto). Up to 3 grown-ups of the island within 40 tiles (the ship's horn calls them) who hold no grudge against the captain; never so many that fewer than half the island stays home. The crew sails in one outbox entry and lands within 4 tiles of the captain. Abroad each raids the stores for itself (4 goods each; the captain's longship load is 8). A crewmate can't sail home alone while its captain is there ("I wait for ..."); the captain waits up to a day for the crew to finish raiding, then sails everyone home, and only the captain beaches the longship. A crew whose captain is gone takes the helm. | `test_viking_crews.py` |
+| Berserkers | A red mushroom (foraged in woods) and mead (2 wild honey at a workshop; honey is foraged in meadows and woods) eaten within a day of each other, plus two weapons (axes or spears) carried: a berserker throws two signs in a holmgang, its throw and the one that beats whatever beats it. A sign must beat both hands to beat it, which none can, so it wins two rounds in three and never loses one outright. A defender warded by its runestone still takes the tied third, so a runestone is the counter. Two berserkers deadlock and the challenged side holds. The rage is spent by the holmgang and costs 25 energy. A raider carrying the fare and two weapons eats it before pillaging. | same |
+| Foraging | `gather` of mushroom or honey walks to the nearest forest (or meadow) tile within 30 and finds one every 6 ticks. Nothing is added to the terrain map, so worlds generate as before. Both are listed in `GATHER_RULES` (with no deposit index, `nearest_resource` finds none), because T22's acceptance test needs every recipe reachable from gatherables. | same |
+| Prompt | The sail line in contact games offers `crew`; a chit sees its own rage only after eating the fare itself; nearby berserkers are visible ("in a berserker's rage, a weapon in each hand"). The parser keeps up to 3 crew names or "auto". | same |
+
+Mutation-checked: the berserker's parry, the two-weapon rule, half the island staying home, the grudge rule, the captain waiting, the crew not beaching a second ship, landing together and a crewmate waiting for its captain each fail a test when switched off.
+
+**Instinct A/B against `main` (`6a1df21`), 12 seeds x 30 days, 128 map, 18 chits:** identical on every seed and every
+measure. A smoke run of a war between the twin islands (12 chits each, 8 days) sent a captain and a crew of 3 each
+way: four holmgangs at the stores, all won by the raiders, and four "came home in a longship laden with plunder".
+
+Not yet: battles between ships at sea, instinct that forages the fare or brews mead, and a run with models.
+
 ## What this means for the next slice
 
 In order of value:

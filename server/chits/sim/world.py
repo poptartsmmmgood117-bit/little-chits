@@ -16,7 +16,7 @@ import uuid
 import zlib
 from collections import Counter, deque
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 from . import terrain as T
 from .agent import TICKS_PER_DAY, Agent, design_prereqs_met, make_name, new_agent
@@ -360,8 +360,8 @@ class World:
         return None
 
     # ------------------------------------------------------------------ contact between islands (T30)
-    def depart(self, a: Agent, ship: str = "boat") -> None:
-        """A chit sails away. It leaves this world (not a death) and is at sea for half a day (less in a longship)."""
+    def _leave(self, a: Agent) -> Dict[str, Any]:
+        """Take a chit out of this world as it sails (not a death); returns it as it travels."""
         self.agents.pop(a.id, None)
         bel = self.beliefs.get(a.belief)
         if bel and a.id in bel["followers"]:
@@ -374,15 +374,25 @@ class World:
             a.homeland = self.id
         if not a.origin:  # sailing from its own land: its home waits for it
             a.voyage_home, a.home_id = a.home or "", a.id
+        return a.to_dict()
+
+    def depart(self, a: Agent, ship: str = "boat", crew: Sequence[Agent] = ()) -> None:
+        """A chit sails away, with its crew if it has one. It is at sea for half a day (less in a longship)."""
+        crew = [c for c in crew if c is not a]
         carried = {k: self.inventions[k] for k in self.inventions
-                   if a.inventory.get(k) or f"recipe:{k}" in a.knows}
-        self.outbox.append({"agent": a.to_dict(), "from": self.id, "arrive_tick": self.tick + BLD.voyage_ticks(self, ship),
-                            "inventions": carried})
-        self.emit("voyage", f"{a.name} sailed away over the sea" + (" in a longship" if ship == "longship" else ""), 5,
-                  a.id, a.x, a.y, ship=ship)
+                   if any(x.inventory.get(k) or f"recipe:{k}" in x.knows for x in [a] + crew)}
+        entry = {"agent": self._leave(a), "from": self.id, "arrive_tick": self.tick + BLD.voyage_ticks(self, ship),
+                 "inventions": carried}
+        if crew:
+            entry["crew"] = [self._leave(c) for c in crew]
+        self.outbox.append(entry)
+        with_crew = f" with a crew of {len(crew)} ({', '.join(c.name for c in crew)})" if crew else ""
+        self.emit("voyage", f"{a.name} sailed away over the sea" + (" in a longship" if ship == "longship" else "")
+                  + with_crew, 5, a.id, a.x, a.y, ship=ship, crew=[c.id for c in crew])
 
     def arrive(self, agent_dict: Dict[str, Any], from_world_id: str, from_name: str = "",
-               inventions: Optional[Dict[str, Any]] = None) -> Agent:
+               inventions: Optional[Dict[str, Any]] = None, near: Optional[Tuple[int, int]] = None) -> Agent:
+        """A chit lands from over the sea: anywhere on the coast, or (one of a crew) beside its captain at `near`."""
         from .invent import register_invention
 
         for key, inv in (inventions or {}).items():  # foreign inventions travel with the chit
@@ -394,15 +404,24 @@ class World:
             a.id = a.home_id  # home again under the id its kin know it by (a clash abroad renamed it)
         while a.id in self.agents or a.id in self.dead:
             a.id += "-x"
-        coast = [(x, y) for y in range(self.h) for x in range(self.w) if self.coastal(x, y) and self.tile_free(x, y)]
-        if coast:
-            a.x, a.y = self.rng_for("contact").choice(coast)
+        spot = None
+        if near is not None:
+            ring = sorted(((max(abs(dx), abs(dy)), dy, dx) for dy in range(-4, 5) for dx in range(-4, 5) if dx or dy))
+            spot = next(((near[0] + dx, near[1] + dy) for _, dy, dx in ring if self.inb(near[0] + dx, near[1] + dy)
+                         and self.passable(near[0] + dx, near[1] + dy) and self.tile_free(near[0] + dx, near[1] + dy)),
+                        None)
+        if spot is not None:
+            a.x, a.y = spot
+        else:
+            coast = [(x, y) for y in range(self.h) for x in range(self.w) if self.coastal(x, y) and self.tile_free(x, y)]
+            if coast:
+                a.x, a.y = self.rng_for("contact").choice(coast)
         a.origin = "" if home_again else from_world_id
         a.home = None
         back = self.structures.get(a.voyage_home or "") if home_again else None
         if back is not None and back.functional:
             a.home = back.id  # a trader comes back to the home it sailed from
-        if home_again and a.voyage_intent == "home":
+        if home_again and a.voyage_intent == "home" and not a.stats.pop("crew", 0):  # (the captain beaches the ship)
             self._beach_boat(a)
         a.plan, a.pending_plan, a.thinking, a.path = [], None, False, []
         a.belief = ""  # a belief id means nothing here; the memory of it stays

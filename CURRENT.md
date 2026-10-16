@@ -49,6 +49,9 @@ The evidence audit of `docs/UPGRADE_PLAN.md` is in
 - **Sea raiders (2026-10-14, contact games):** longships, runestones and rune charms, and the holmgang of rune, sail,
   axe (rock, paper, scissors) that settles grudges and raids without anyone getting hurt. It is in the status doc
   under "Sixth pass", and the instinct A/B against `main` is identical on all 12 seeds.
+- **Crews and berserkers (2026-10-16, contact games):** a raiding longship carries up to 3 friends, and a chit who
+  has eaten the red mushroom and drunk mead, with a weapon in each hand, fights a holmgang as a berserker. "Seventh
+  pass" in the status doc; the instinct A/B is again identical on all 12 seeds.
 
 ## Codex recovery, resolved 2026-09-29 (history)
 

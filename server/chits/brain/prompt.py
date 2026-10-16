@@ -86,6 +86,9 @@ def verb_guide(world) -> str:
                  + (', and tell those at home' if world.flags.get("say") else '') + ')')
     if getattr(world, "contact", False):
         lines.append('{"do":"sail","intent":"explore|trade|raid|settle"}  (take a boat across the sea to the other island; strangers there sail home the same way)')
+        lines.append('{"do":"sail","intent":"raid","crew":["<name>","<name>"]}  (a ship big enough for a crew takes up to 3 '
+                     'friends close by who hold no grudge against you, or "crew":"auto"; abroad, each raids for itself, and '
+                     'the crew sails home when you do)')
         lines.append('{"do":"trade","at":"stores"}  (a trader from over the sea: swap the goods you carried over at the stores here '
                      'for goods of the same worth, then {"do":"sail"} home in your boat)')
         lines.append('{"do":"pillage","throws":["rune","sail","axe"]}  (a raider from over the sea: go for the stores here. If '
@@ -314,6 +317,10 @@ def scene(world, a: Agent) -> str:
         f"energy {a.energy:.0f} ({_level(a.energy, ('exhausted!', 'tired', 'ok', 'rested'))}), "
         f"warmth {a.warmth:.0f} ({_level(a.warmth, ('freezing!', 'cold', 'ok', 'warm'))}), health {a.health:.0f}."
     )
+    if HG.raging(world, a):  # (only after it ate the mushroom and drank the mead itself: it knows what they do)
+        lines.append("A berserker's rage is in you" + (", and a weapon in each hand: in a holmgang you throw two signs "
+                     "and nobody who isn't raging too can beat you outright" if HG.berserk(world, a) else
+                     ", but you need a weapon (axe or spear) in each hand to fight as a berserker"))
     inv = ", ".join(f"{n} {world.item_name(k)}{_worn(a, k)}" for k, n in sorted(a.inventory.items())) or "nothing"
     full = " — your hands are FULL: store or drop something before gathering more" if a.free_space() <= 0 else ""
     lines.append(f"Carrying ({a.load()}/{a.capacity()}): {inv}.{full}")
@@ -404,6 +411,8 @@ def scene(world, a: Agent) -> str:
                      if not world.recipe(k) and (n >= 5 or (n >= 2 and k in _FOODS))][:2]
             carry = made + stock
             extra = f", holding {', '.join(carry)}" if carry else ""
+            if HG.berserk(world, o):  # visible: the mushroom-wild eyes and a weapon in each hand
+                extra += ", in a berserker's rage, a weapon in each hand"
             seen = HG.seen_habit(a, o)  # how they played rune, sail, axe against this chit: a sharp one plays against it
             if seen:
                 extra += f", in holmgangs with you threw {seen}"
@@ -600,6 +609,9 @@ def compact_scene(world, a: Agent) -> str:
     hh = int(c["hour"])
     L: List[str] = [f"Day {c['day']} {c['season']} {hh:02d}h{' night' if c['night'] else ''}. You: {a.name} at ({a.x},{a.y})."]
     L.append(f"Hunger {a.hunger:.0f} energy {a.energy:.0f} warmth {a.warmth:.0f} health {a.health:.0f} (of 100).")
+    if HG.raging(world, a):
+        L.append("A berserker's rage is in you" + ("; a weapon in each hand: two signs per holmgang throw"
+                 if HG.berserk(world, a) else "; you need a weapon in each hand to fight as a berserker") + ".")
     inv = ", ".join(f"{n} {world.item_name(k)}{_worn(a, k)}" for k, n in sorted(a.inventory.items())) or "nothing"
     L.append(f"Carrying ({a.load()}/{a.capacity()}): {inv}{' FULL' if a.free_space() <= 0 else ''}.")
     rec = [world.item_name(k.split(':', 1)[1]) for k in a.knows if k.startswith("recipe:")]
