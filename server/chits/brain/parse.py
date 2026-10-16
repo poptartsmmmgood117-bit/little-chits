@@ -228,6 +228,14 @@ def normalize_step(raw: Any) -> Optional[Dict[str, Any]]:
         for k in ("intent", "home"):
             if k in d:
                 step[k] = d.pop(k)
+        crew = d.pop("crew", None)  # who sails with a raiding longship: names (at most 3), or "auto"
+        if isinstance(crew, str) and crew.strip().lower() == "auto":
+            step["crew"] = "auto"
+        elif isinstance(crew, (list, tuple, str)):
+            names = [str(n).strip()[:40] for n in (crew if not isinstance(crew, str) else crew.split(","))
+                     if isinstance(n, (str, int)) and str(n).strip()][:3]
+            if names:
+                step["crew"] = names
     if verb in ("holmgang", "pillage"):  # rune, sail, axe: the throws, in turn (only those three words survive)
         from ..sim.holmgang import norm_throws
 

@@ -19,6 +19,13 @@ Two pieces of magic bend fate a little:
   again (once, and the charm is spent);
 - a **runestone** on a chit's own island within RUNESTONE_WARD tiles wards it: a tied round goes to the warded side
   (when both are warded, ties are thrown again as usual).
+
+And a **berserker** fights with a weapon in each hand. A chit that has eaten the red mushroom and drunk mead within
+BERSERK_TICKS, and carries two weapons (axes or spears), throws two signs at once: the one it names and the one that
+beats whatever beats it. It wins a round if either hand beats the other side's sign, and a sign must beat both its hands
+to beat it, which no sign can: a berserker wins two rounds in three and never loses one outright (though a runestone's
+ward still gives the warded side the ties). Two berserkers only deadlock (and the one challenged holds its ground).
+The rage is spent by the holmgang (and leaves the berserker worn out).
 """
 
 from __future__ import annotations
@@ -35,6 +42,9 @@ WINS_NEEDED, MAX_ROUNDS = 2, 9
 RUNESTONE_WARD = 12
 HABIT_KEEP = 0.7  # how often a chit without named throws follows its habit (win-stay, lose-shift)
 PRIDE = 8.0  # the mood a loser loses, and half of it the winner gains: nothing worse
+BERSERK_TICKS = 240  # a day: the mushroom and the mead must both be in a chit within this long of each other and now
+WEAPONS = ("axe", "spear", "weapon")  # tool classes a berserker swings
+SPENT = 25.0  # energy a berserker's rage costs once it is over
 
 
 def norm_throw(raw: Any) -> Optional[str]:
@@ -79,6 +89,35 @@ def _habit_throw(a: Agent, rng) -> str:
     return next(t for t in THROWS if BEATS[t] == prev) if rng.random() < 0.5 else BEATS[prev]  # it lost: change
 
 
+def weapons(a: Agent) -> int:
+    """How many weapons (axes or spears) a chit carries."""
+    return sum(n for k, n in a.inventory.items() if n > 0 and (it := a._item(k)) is not None and it.tool in WEAPONS)
+
+
+def raging(world, a: Agent) -> bool:
+    """Mushroom eaten and mead drunk within a day, both still in it: the rage (berserk() also needs the weapons)."""
+    t = world.tick
+    return all(k in a.stats and 0 <= t - a.stats[k] <= BERSERK_TICKS for k in ("mushroom_t", "mead_t"))
+
+
+def berserk(world, a: Agent) -> bool:
+    return raging(world, a) and weapons(a) >= 2
+
+
+def hands(t: str, wild: bool) -> tuple:
+    """The signs a chit shows: one, or for a berserker two (its throw and the one that beats whatever beats it)."""
+    if not wild:
+        return (t,)
+    w = next(x for x in THROWS if BEATS[x] == t)  # what beats t
+    return (t, next(x for x in THROWS if BEATS[x] == w))  # ...and what beats that
+
+
+def _beats(xs, ys) -> bool:
+    """One of these hands beats every one of those: a berserker parries with its other weapon, so nobody beats it,
+    and two berserkers can only deadlock."""
+    return any(all(BEATS[x] == y for y in ys) for x in xs)
+
+
 def warded(world, a: Agent) -> bool:
     from . import buildings as BLD
 
@@ -94,28 +133,32 @@ def play(world, a: Agent, b: Agent, a_throws: Sequence[str] = (), b_throws: Sequ
     named = {a.id: list(a_throws), b.id: list(b_throws)}
     charm = {x.id: x.inventory.get("rune_charm", 0) > 0 for x in (a, b)}
     ward = {a.id: warded(world, a), b.id: warded(world, b)}
+    wild = {a.id: berserk(world, a), b.id: berserk(world, b)}
     score = {a.id: 0, b.id: 0}
     rounds: List[Dict[str, Any]] = []
     i = 0
     while max(score.values()) < WINS_NEEDED and len(rounds) < MAX_ROUNDS:
         ta, tb = (named[x.id][i % len(named[x.id])] if named[x.id] else _habit_throw(x, rng) for x in (a, b))
         i += 1
-        if ta == tb:
+        ha, hb = hands(ta, wild[a.id]), hands(tb, wild[b.id])
+        extra = {k: h[1] for k, h in (("a2", ha), ("b2", hb)) if len(h) > 1}
+        aw, bw = _beats(ha, hb), _beats(hb, ha)
+        if aw == bw:  # a tie
             winner = a if ward[a.id] and not ward[b.id] else b if ward[b.id] and not ward[a.id] else None
-            rounds.append({"a": ta, "b": tb, "win": winner.id if winner else "", "ward": bool(winner)})
+            rounds.append({"a": ta, "b": tb, **extra, "win": winner.id if winner else "", "ward": bool(winner)})
             if winner:
                 score[winner.id] += 1
             continue
-        winner, loser = (a, b) if BEATS[ta] == tb else (b, a)
+        winner, loser = (a, b) if aw else (b, a)
         if charm[loser.id]:  # the charm flares: this round never happened
             charm[loser.id] = False
             loser.inventory["rune_charm"] -= 1
             if loser.inventory["rune_charm"] <= 0:
                 loser.inventory.pop("rune_charm", None)
-            rounds.append({"a": ta, "b": tb, "win": "", "charm": loser.id})
+            rounds.append({"a": ta, "b": tb, **extra, "win": "", "charm": loser.id})
             continue
         score[winner.id] += 1
-        rounds.append({"a": ta, "b": tb, "win": winner.id})
+        rounds.append({"a": ta, "b": tb, **extra, "win": winner.id})
     win = a if score[a.id] >= WINS_NEEDED else b  # (undecided after MAX_ROUNDS: the one challenged holds its ground)
     lose = b if win is a else a
     for x, key in ((a, "a"), (b, "b")):
@@ -125,22 +168,32 @@ def play(world, a: Agent, b: Agent, a_throws: Sequence[str] = (), b_throws: Sequ
         x.stats["holm_last"] = THROWS.index(thrown[-1]) + 1
         x.stats["holm_last_won"] = int(x is win)
         x.bump("holm_won" if x is win else "holm_lost")
+    for x in (a, b):
+        if wild[x.id]:  # the rage is spent
+            x.stats.pop("mushroom_t", None)
+            x.stats.pop("mead_t", None)
+            x.energy = max(0.0, x.energy - SPENT)
+            x.bump("berserk_fights")
     lose.mood = max(0.0, lose.mood - PRIDE)
     win.mood = min(100.0, win.mood + PRIDE / 2)
     for x, y, theirs in ((a, b, "b"), (b, a, "a")):
         seen = ", ".join(r[theirs] for r in rounds)
         x.remember(world.tick, f"In the holmgang {y.name} threw {seen}; " + ("I won" if x is win else "I lost"), 4,
                    "holmgang")
-    return {"winner": win, "loser": lose, "rounds": rounds, "score": dict(score)}
+    return {"winner": win, "loser": lose, "rounds": rounds, "score": dict(score), "berserk": dict(wild)}
 
 
 def tale(res: Dict[str, Any], a: Agent, b: Agent) -> str:
-    """The deciding round, told: 'Astrid's rune bound Bjorn's axe'."""
+    """The deciding round, told: 'Astrid's rune binds the axe' (and a berserker's rage, if there was one)."""
     win = res["winner"]
+    rage = f"{win.name} fought as a berserker, a weapon in each hand, and " if res.get("berserk", {}).get(win.id) else ""
     last = next((r for r in reversed(res["rounds"]) if r["win"] == win.id), None)
     if last is None:
         return f"{win.name} held their ground"
     if last.get("ward"):
-        return f"the runestone's ward turned the tie for {win.name}"
-    mine = last["a"] if win is a else last["b"]
-    return WHY[mine].replace("the ", f"{win.name}'s ", 1)
+        return rage + f"the runestone's ward turned the tie for {win.name}"
+    me, them = ("a", "b") if win is a else ("b", "a")
+    mine = [last[me]] + ([last[me + "2"]] if me + "2" in last else [])
+    theirs = [last[them]] + ([last[them + "2"]] if them + "2" in last else [])
+    hand = next(h for h in mine if all(BEATS[h] == t for t in theirs))
+    return rage + WHY[hand].replace("the ", f"{win.name}'s ", 1)
