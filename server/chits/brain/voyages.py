@@ -122,21 +122,112 @@ def at_war(world) -> bool:
     return any(r.get("state") == "war" for r in getattr(world, "relations", {}).values())
 
 
-def raid_plan(world, a: Agent) -> Plan | None:
-    """At war, with a longship at hand: one raider at a time sails over to try the other village's stores."""
+PREP_EVERY_DAYS = 2  # one chit at a time readies itself as a berserker, at most this often
+PREP_W = 3.0
+
+
+def carrying_fare(a: Agent) -> bool:
+    """Carrying the red mushroom, mead and two weapons: a berserker in waiting, fare in hand."""
+    from ..sim import holmgang as HG
+
+    return a.inventory.get("mushroom", 0) > 0 and a.inventory.get("mead", 0) > 0 and HG.weapons(a) >= 2
+
+
+def ready(world, a: Agent) -> bool:
+    """Two weapons in hand, and the fare in hand or waiting in the stores nearby (a busy chit puts its load away)."""
+    from ..sim import holmgang as HG
+
+    return carrying_fare(a) or (HG.weapons(a) >= 2 and _stored_fare(world, a) is not None)
+
+
+def _stored_fare(world, a: Agent):
+    """A store near this chit holding both a red mushroom and mead (a busy chit puts its load away), else None."""
+    return next((p for p in world.structures_near(a.x, a.y, 25, "stockpile") if p.functional
+                 and p.storage.get("mushroom", 0) > 0 and p.storage.get("mead", 0) > 0), None)
+
+
+def _war_ship(world, a: Agent):
+    """At war, in a contact game, a grown-up of this island with a longship on its land: else None."""
     if a.origin or a.is_child(world.tick) or not getattr(world, "contact", False) or not at_war(world):
         return None
+    return next((b for b in world.structures_near(a.x, a.y, max(world.w, world.h), "longship") if b.functional and world.same_land(a, b)), None)
+
+
+def berserk_prep_plan(world, a: Agent) -> Plan | None:
+    """At war, with a longship on the shore or out raiding (or the idea of one): one chit readies itself to raid as a
+    berserker. It finds a red mushroom in the woods,
+    gets mead (brews it from wild honey at a workshop, or tries honey there if nobody knows how yet), and a second
+    weapon. Then raid_plan sends it first."""
+    from ..sim import holmgang as HG
+    from .instinct import _craft_steps, _need_steps
+
+    if a.origin or a.is_child(world.tick) or not getattr(world, "contact", False) or not at_war(world) or ready(world, a):
+        return None  # (or all set: the fare in hand or waiting in the stores)
+    if _war_ship(world, a) is None and not a.knows_design("longship"):
+        return None  # (the ship is usually away raiding: knowing what a longship is will do)
+    t = world.tick
+    since, who = (world.civic.get("berserk_prep") or [-10 ** 9, ""])[:2]
+    if who != a.id and t - since < PREP_EVERY_DAYS * TICKS_PER_DAY:
+        return None  # someone else is readying itself
+    if any(ready(world, o) for o in world.agents.values() if not o.origin and o is not a):
+        return None  # a berserker is already waiting
+    from ..sim.actions import STATION_REACH
+
+    workshop = world.nearest_station(a.x, a.y, "workshop", STATION_REACH)
+    steps: List[Dict[str, Any]] = []
+    if not a.inventory.get("mushroom"):
+        steps += _need_steps(a, {"mushroom": 1}, world) or [{"do": "gather", "what": "mushroom", "qty": 1}]
+    if not a.inventory.get("mead"):
+        if a.knows_recipe("mead"):
+            brew = _craft_steps(a, "mead", 1, world=world)
+            if not brew:
+                return None
+            steps += brew
+        elif workshop is not None:  # nobody here knows mead yet: honey at a workshop is the obvious thing to try
+            need = max(0, 2 - a.inventory.get("honey", 0))
+            steps += ([{"do": "gather", "what": "honey", "qty": need}] if need else []) + [
+                {"do": "experiment", "with": ["honey", "honey"], "at": "workshop"}]
+        else:
+            return None
+    if HG.weapons(a) < 2:
+        arm = next((s for k in ("spear", "stone_axe") if a.knows_recipe(k) for s in [_craft_steps(a, k, 1, world=world)]
+                    if s), None)
+        if not arm:
+            return None
+        steps += arm
+    if who != a.id:
+        world.civic["berserk_prep"] = [t, a.id]  # (saved with the village; the same chit is offered it again)
+    return {"goal": "ready myself as a berserker",
+            "thought": "The red mushroom, the mead, an axe in each hand. Over the sea they won't stand against that.",
+            "steps": steps[:6]}
+
+
+def raid_plan(world, a: Agent) -> Plan | None:
+    """At war, with a longship at hand: one raider at a time sails over to try the other village's stores (a readied
+    berserker first)."""
+    if a.origin or a.is_child(world.tick) or not getattr(world, "contact", False) or not at_war(world):
+        return None
+    if not ready(world, a) and any(ready(world, o) for o in world.agents.values() if not o.origin and o is not a
+                            and not o.is_child(world.tick)):
+        return None  # our berserker goes
     last = (getattr(world, "civic", None) or {}).get("raider_sent", -10 ** 9)
     if world.tick - last < SEND_EVERY_DAYS * TICKS_PER_DAY:
         return None
     if any((o.get("agent") or {}).get("voyage_intent") == "raid" for o in getattr(world, "outbox", [])):
         return None
-    ship = next((b for b in world.structures_near(a.x, a.y, 60, "longship") if b.functional and world.same_land(a, b)), None)
+    ship = next((b for b in world.structures_near(a.x, a.y, max(world.w, world.h), "longship") if b.functional and world.same_land(a, b)), None)
     if ship is None:
         return None
+    from ..sim import holmgang as HG
+
+    fare = []  # two weapons in hand, and the berserker's fare waiting in the stores: take it along
+    pile = _stored_fare(world, a) if not carrying_fare(a) and HG.weapons(a) >= 2 else None
+    if pile is not None:
+        fare = [{"do": "take", "what": k, "qty": 1, "target": pile.id} for k in ("mushroom", "mead")
+                if not a.inventory.get(k)]
     return {"goal": "go raiding over the sea",
             "thought": "They are our enemies now. The longship is ready, and the runes are carved.",
-            "steps": [{"do": "sail", "target": ship.id, "intent": "raid", "crew": "auto"}]}
+            "steps": fare + [{"do": "sail", "target": ship.id, "intent": "raid", "crew": "auto"}]}
 
 
 def longship_plan(world, a: Agent) -> Plan | None:
@@ -168,7 +259,10 @@ def options(world, a: Agent, rng) -> List[Tuple[float, Plan]]:
         return [(ABROAD_W, plan)]
     plan = raid_plan(world, a)
     if plan:
-        return [(SEND_W + 1.0 - a.traits.get("caution", 0.5), plan)]
+        return [(SEND_W + 1.0 - a.traits.get("caution", 0.5) + (1.0 if ready(world, a) else 0.0), plan)]
+    plan = berserk_prep_plan(world, a)
+    if plan:
+        return [(PREP_W - a.traits.get("caution", 0.5), plan)]  # war is a strong pull: like a tool it needs
     plan = send_plan(world, a) or boat_plan(world, a) or longship_plan(world, a)
     return [(SEND_W + a.traits.get("sociability", 0.5), plan)] if plan else []
 
