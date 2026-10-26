@@ -88,6 +88,9 @@ SCARCE = ("sand", "clay", "ore", "iron_ore")
 SCARCE_RADIUS = 72  # tiles a chit will walk for a scarce material its mind asked for
 CAMP_SLEEP, CAMP_FAR = 12, 30  # a chit this far from home sleeps at an outpost camp this close
 
+# found, not mined: picked from a tile of these kinds (no deposit on the terrain map, so the land is as it was)
+WILD = {"mushroom": (T.FOREST,), "honey": (T.MEADOW, T.FOREST)}
+WILD_REACH, WILD_WORK = 30, 6
 FOODS = ("loaf", "bread", "berry_tart", "cooked_meat", "cooked_fish", "meat", "fish", "berries", "grain")
 
 
@@ -440,8 +443,52 @@ def advance(world, a: Agent, step: Dict[str, Any]) -> str:
     return fn(world, a, step, s)
 
 
+def _pick_wild(world, a: Agent, step, s, kind: str) -> str:
+    """Red mushrooms in the woods, wild honey in meadows and woods: walk to the nearest such tile and search it."""
+    want = s.setdefault("want", _qty(step, 2, 1, 6))
+    got = s.setdefault("got", 0)
+    nm = world.item_name(kind)
+    if got >= want:
+        s["note"] = f"Found {got} {nm}"
+        return DONE
+    if a.free_space() < 1:
+        s["note"] = f"Found {got} {nm} (hands full)"
+        return DONE if got else "my hands are full"
+    tgt = s.get("wild")
+    if tgt is None:
+        avoid = set(map(tuple, s.setdefault("avoid", [])))
+        best = None
+        for y in range(max(0, a.y - WILD_REACH), min(world.h, a.y + WILD_REACH + 1)):
+            for x in range(max(0, a.x - WILD_REACH), min(world.w, a.x + WILD_REACH + 1)):
+                if world.tiles[y * world.w + x] in WILD[kind] and (x, y) not in avoid and world.passable(x, y) \
+                        and world.same_land_xy(a, x, y):
+                    d = max(abs(x - a.x), abs(y - a.y))
+                    if best is None or d < best[0]:
+                        best = (d, x, y)
+        if best is None:
+            return f"there are no {'woods' if kind == 'mushroom' else 'meadows or woods'} nearby to look for {nm} in"
+        tgt = s["wild"] = [best[1], best[2]]
+    mv = move_toward(world, a, s, {tuple(tgt)})
+    if mv == "blocked":
+        s["avoid"].append(tgt)
+        s.pop("wild")
+        return RUNNING if len(s["avoid"]) < 4 else "couldn't get there"
+    if mv != "arrived":
+        return RUNNING
+    a.activity = "foraging"
+    s["t"] = s.get("t", 0) + 1
+    if s["t"] % WILD_WORK == 0:
+        if not a.add(kind):
+            return DONE if got else "my hands are full"
+        s["got"] = got + 1
+        world.notice_items(a)
+    return RUNNING
+
+
 def _do_gather(world, a: Agent, step, s) -> str:
     kind = world.norm_item(step.get("what"))
+    if kind in WILD:
+        return _pick_wild(world, a, step, s, kind)
     if kind is not None and kind not in GATHER_RULES and _stockpile_with(world, a, [kind], 30):
         # made things don't grow on the land: take them from the stockpile that holds them ("gather brick" x386)
         return _do_take(world, a, dict(step, do="take"), s)
@@ -664,7 +711,7 @@ def _forage(world, a: Agent, s) -> str:
 def _do_eat(world, a: Agent, step, s) -> str:
     want = world.norm_item(step.get("what")) if step.get("what") else None
     foods = food_items(a)
-    if want and want in foods:
+    if want and (want in foods or (want in RAGE_FARE and a.inventory.get(want, 0) > 0)):
         pick = want
     elif foods:
         pick = foods[0] if a.hunger < 50 else foods[-1]
@@ -709,12 +756,37 @@ def _do_eat(world, a: Agent, step, s) -> str:
     a.remove(pick, 1)
     a.hunger = min(100.0, a.hunger + world.item(pick).food)
     a.bump("meals")
+    if pick in RAGE_FARE:
+        return _rage_fare(world, a, pick, s)
     if pick in ("bread", "berry_tart", "cooked_fish"):
         a.mood = min(100.0, a.mood + 4)
     if a.hunger < 70 and food_items(a) and s.get("ate", 0) < 4:
         s["ate"] = s.get("ate", 0) + 1
         return RUNNING
     s["note"] = f"Ate {world.item_name(pick)}; hunger now {a.hunger:.0f}/100"
+    return DONE
+
+
+RAGE_FARE = {"mushroom": "mushroom_t", "mead": "mead_t"}
+
+
+def _rage_fare(world, a: Agent, pick: str, s) -> str:
+    """The red mushroom and mead: together (within a day) a berserker's rage, if two weapons are at hand."""
+    from . import holmgang as HG
+
+    was = HG.berserk(world, a)
+    a.stats[RAGE_FARE[pick]] = world.tick
+    a.remember(world.tick, "I ate a red mushroom: the world swims and burns" if pick == "mushroom"
+               else "I drank mead: it went down like fire", 3, "event")
+    if HG.raging(world, a):
+        a.set_emote("🔥", world.tick, 60)
+    if HG.berserk(world, a) and not was:
+        world.emit("berserk", f"{a.name} ate the red mushroom and drank mead, took up a weapon in each hand, and a "
+                              f"berserker's rage came over them", 3, a.id, a.x, a.y)
+        s["note"] = "A berserker's rage is on me"
+    else:
+        s["note"] = f"{'Ate' if pick == 'mushroom' else 'Drank'} {world.item_name(pick)}" + (
+            "; the rage is in me, but I need a weapon in each hand" if HG.raging(world, a) else "")
     return DONE
 
 
@@ -1963,6 +2035,7 @@ def _do_pillage(world, a: Agent, step, s) -> str:
     if s["t"] < 3:
         return RUNNING
     a.stats["pillaged_trip"] = 1
+    a.stats["pillaged_at"] = world.tick
     founder = world.agents.get(st.founder)
     locals_ = sorted((o for o in _watchers(world, st, 6, a) if not o.origin and not o.is_child(world.tick)),
                      key=lambda o: (not (o.activity == "guarding" or o.job == "guard"), st.dist(o.x, o.y), o.id))
@@ -3406,17 +3479,59 @@ def _do_tame(world, a: Agent, step, s) -> str:
     return RUNNING
 
 
+CREW_MAX, CREW_REACH = 3, 40  # a longship's raiding crew besides its captain; its horn calls them from this far
+# (a ship is beached on the shore, often a long way from the village)
+
+
+def _crewmates(world, cap: Agent) -> List[Agent]:
+    """The crew of this captain's longship, here over the sea with it."""
+    return [o for o in world.agents.values() if o is not cap and o.origin and o.stats.get("crew")
+            and o.homeland == cap.homeland and o.voyage_intent == "raid"]
+
+
+def _captain(world, a: Agent) -> Optional[Agent]:
+    """The captain whose longship brought this crewmate over (still here with it)."""
+    return next((o for o in world.agents.values() if o is not a and o.origin and o.homeland == a.homeland
+                 and o.voyage_intent == "raid" and o.stats.get("longship_abroad") and o.stats.get("boat_abroad")), None)
+
+
+def _pick_crew(world, a: Agent, want: Any) -> List[Agent]:
+    """Who sails with a raiding longship: grown-ups of this island close by who hold no grudge against the captain;
+    the ones named, or (with "auto") the captain's best friends. Never so many that fewer than half stay home."""
+    if not want:
+        return []
+    names = None
+    if not (want is True or str(want).strip().lower() == "auto"):
+        raw = want if isinstance(want, (list, tuple)) else str(want).replace(",", " ").split()
+        names = {str(n).strip().lower() for n in raw}
+    t = world.tick
+    cands = [o for o in world.agents_near(a.x, a.y, CREW_REACH, exclude=a.id) if not o.origin and not o.is_child(t)
+             and o.activity != "sleeping" and o.affinity.get(a.id, 0.0) >= 0 and world.same_land_xy(a, o.x, o.y)
+             and (names is None or o.name.lower() in names)]
+    cands.sort(key=lambda o: (-o.affinity.get(a.id, 0.0), o.id))
+    home = sum(1 for o in world.agents.values() if not o.origin)
+    return cands[:min(CREW_MAX, (home - 1) // 2)]  # at least half the island stays home
+
+
 def _do_sail(world, a: Agent, step, s) -> str:
     """Take a boat out to sea (T30). With contact off there is nothing out there. A trader from over the sea sails
     home in the boat it came in (it is drawn up on the shore: nobody else can take it), and so does a raider who came
     in a longship. A longship is preferred to a boat: it is twice as fast."""
     if getattr(world, "is_fork", False):
         return "the sea is closed: this is a what-if"
+    if a.origin and a.stats.get("crew") and a.voyage_intent == "raid":
+        cap = _captain(world, a)
+        if cap is not None:
+            return f"I wait for {cap.name}: the longship sails home with all its crew"
+        a.stats.pop("crew")  # the captain is gone: this crewmate takes the helm
+        a.stats["boat_abroad"] = a.stats["longship_abroad"] = 1
     if a.origin and a.voyage_intent in ("trade", "raid") and a.stats.get("boat_abroad"):  # (home, even after a fair)
-        a.stats["boat_abroad"] = a.stats["traded_trip"] = a.stats["pillaged_trip"] = 0
-        a.voyage_intent = "home"
-        a.activity = "sailing home"
-        world.depart(a, "longship" if a.stats.get("longship_abroad") else "boat")
+        crew = _crewmates(world, a) if a.stats.get("longship_abroad") and a.voyage_intent == "raid" else []
+        for x in [a] + crew:
+            x.stats["boat_abroad"] = x.stats["traded_trip"] = x.stats["pillaged_trip"] = 0
+            x.voyage_intent = "home"
+            x.activity = "sailing home"
+        world.depart(a, "longship" if a.stats.get("longship_abroad") else "boat", crew)
         return DONE
     boat = (None if step.get("target") else _find_structure(world, a, None, 20, lambda x: x.design == "longship" and x.functional)) \
         or _find_structure(world, a, step.get("target"), 20, lambda x: x.design in ("boat", "longship") and x.functional)
@@ -3446,11 +3561,16 @@ def _do_sail(world, a: Agent, step, s) -> str:
         from ..brain import voyages
 
         voyages.sent(world, "raider")
+    crew = _pick_crew(world, a, step.get("crew")) if boat.design == "longship" and a.voyage_intent == "raid" else []
+    for o in crew:
+        o.voyage_intent, o.activity = "raid", "sailing"
+        o.stats["crew"] = 1
+        o.remember(world.tick, f"I sailed to raid over the sea in {a.name}'s longship", 4, "voyage")
     world.structures.pop(boat.id, None)
     world.removed_struct.add(boat.id)
     for cx, cy in boat.cells():
         world.occupied.pop(cy * world.w + cx, None)
-    world.depart(a, boat.design)
+    world.depart(a, boat.design, crew)
     return DONE
 
 

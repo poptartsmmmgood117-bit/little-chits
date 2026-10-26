@@ -28,9 +28,20 @@ def abroad_plan(world, a: Agent) -> Plan | None:
     """A trader from over the sea: barter its load, then sail home. A raider: try the stores, then sail home."""
     if a.origin and a.voyage_intent == "raid":
         if not a.stats.get("pillaged_trip"):
+            from ..sim import holmgang as HG
+
+            rage = []  # carrying the red mushroom and mead, and two weapons: go in as a berserker
+            if HG.weapons(a) >= 2 and a.inventory.get("mushroom") and a.inventory.get("mead") and not HG.raging(world, a):
+                rage = [{"do": "eat", "what": "mushroom"}, {"do": "eat", "what": "mead"}]
             return {"goal": "raid the stores here", "thought": "The longship is beached. To the stores, and may the runes favour me.",
-                    "steps": [{"do": "pillage"}]}
+                    "steps": rage + [{"do": "pillage"}]}
         if a.stats.get("boat_abroad"):
+            from ..sim.actions import _crewmates
+
+            waiting = [o for o in _crewmates(world, a) if not o.stats.get("pillaged_trip")]
+            if waiting and world.tick - a.stats.get("pillaged_at", -10 ** 9) < TICKS_PER_DAY:
+                return {"goal": "wait for the crew", "thought": f"{waiting[0].name} is still at the stores. We sail together.",
+                        "steps": [{"do": "rest"}]}
             return {"goal": "sail home with the plunder", "thought": "Back to the ship, and home over the whale-road.",
                     "steps": [{"do": "sail", "intent": "home"}]}
         return None
@@ -125,7 +136,7 @@ def raid_plan(world, a: Agent) -> Plan | None:
         return None
     return {"goal": "go raiding over the sea",
             "thought": "They are our enemies now. The longship is ready, and the runes are carved.",
-            "steps": [{"do": "sail", "target": ship.id, "intent": "raid"}]}
+            "steps": [{"do": "sail", "target": ship.id, "intent": "raid", "crew": "auto"}]}
 
 
 def longship_plan(world, a: Agent) -> Plan | None:

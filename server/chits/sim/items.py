@@ -94,6 +94,10 @@ ITEMS: Dict[str, Item] = {
         # the sea-raiders' age: a sail for a longship, and a little carved magic
         Item("sail", "sail", ("woven", "wide", "catches the wind"), icon="⛵"),
         Item("rune_charm", "rune charm", ("carved", "small", "hums faintly", "lucky"), icon="ᚱ"),
+        # a berserker's fare: foraged in the woods and meadows (never on the terrain map), and brewed
+        Item("mushroom", "red mushroom", ("red-capped", "white-spotted", "strange"), food=3, icon="🍄"),
+        Item("honey", "wild honey", ("sweet", "sticky", "golden"), food=10, icon="🍯"),
+        Item("mead", "mead", ("drink", "brewed", "fiery"), food=8, icon="🍯"),
     ]
 }
 
@@ -177,6 +181,7 @@ RECIPES: Dict[str, Recipe] = {
         _r("ale", {"grain": 2, "berries": 1}, station="workshop", qty=2, work=6),
         _r("clothes", {"fiber": 4, "cord": 1}, station="loom", work=8),
         _r("sail", {"cloth": 3}, station="workshop", work=10),
+        _r("mead", {"honey": 2}, station="workshop", work=8),
     ]
 }
 
@@ -194,6 +199,9 @@ ACTION_USES: Dict[str, str] = {
     "clothes": "wear them: a warm thing to wear halves the cold",
     "grain": "eat it, or bake bread at a fire",
     "plough": "carry it while harvesting a farm to double the base grain yield",
+    "mushroom": "eat it: with mead drunk too and two weapons (axes or spears) in hand, a berserker's rage carries you "
+                "through a holmgang, a weapon in each hand",
+    "mead": "drink it (eat it): with a red mushroom eaten too and two weapons in hand, a berserker's rage",
     "rune_charm": "carry it into a holmgang: once, it turns a lost round (then it crumbles); pray at a runestone of "
                   "your island to be given one",
 }
@@ -414,6 +422,9 @@ GATHER_RULES: Dict[str, Dict[str, object]] = {
     "sand": {"tool": None, "requires": False, "work": 3},
     "fish": {"tool": "spear", "requires": True, "work": 7},
     "seeds": {"tool": None, "requires": False, "work": 4},
+    # foraged, not mined: no deposit on the terrain map; a chit searches woods or meadows for them (actions.WILD)
+    "mushroom": {"tool": None, "requires": False, "work": 6},
+    "honey": {"tool": None, "requires": False, "work": 6},
 }
 
 GATHERABLE = tuple(GATHER_RULES.keys())
@@ -485,7 +496,8 @@ def normalize_item(raw: object) -> Optional[str]:
         "bricks": "brick", "tablet": "clay_tablet", "tablets": "clay_tablet", "pots": "pot", "clay pot": "pot",
         "alien ship": "alien_ship", "spaceship": "alien_ship", "ufo": "alien_ship", "bible": "holy_book", "book": "holy_book",
         "charm": "rune_charm", "rune": "rune_charm", "runes": "rune_charm", "amulet": "rune_charm", "talisman": "rune_charm",
-        "sails": "sail", "canvas": "sail",
+        "sails": "sail", "canvas": "sail", "fly agaric": "mushroom", "toadstool": "mushroom",
+        "red mushroom": "mushroom", "shroom": "mushroom", "shrooms": "mushroom", "bees": "honey", "honeycomb": "honey",
         "fishes": "fish", "cooked fish": "cooked_fish", "tart": "berry_tart", "pie": "berry_tart",
     }
     if s in aliases:

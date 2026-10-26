@@ -126,8 +126,8 @@ def test_a_longship_raid_holmgang_plunder_and_home_with_the_ship(tmp_path, monke
         w.relation("B" if w is wa else "A")["state"] = "war"
     ship = _put(wa, a, "longship", (a.x, a.y))
     [(_, plan)] = VOY.options(wa, a, random.Random(1))
-    assert plan["steps"] == [{"do": "sail", "target": ship.id, "intent": "raid"}]
-    assert _do(wa, a, plan["steps"][0]) == actions.DONE
+    assert plan["steps"] == [{"do": "sail", "target": ship.id, "intent": "raid", "crew": "auto"}]
+    assert _do(wa, a, dict(plan["steps"][0], crew=[])) == actions.DONE  # (a lone raider here: crews are tested below)
     [voyage] = wa.outbox
     assert voyage["arrive_tick"] - wa.tick == BLD.voyage_ticks(wa) // 2  # twice a boat's speed
     assert VOY.raid_plan(wa, next(iter(wa.agents.values()))) is None  # one raider at a time
