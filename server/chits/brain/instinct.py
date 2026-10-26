@@ -323,7 +323,8 @@ class Instinct:
     def plan(self, world, a: Agent) -> Dict[str, Any]:
         self._world = world  # for _exp_plan's stockpile lookups
         rng = random.Random(world.tick * 7919 + zlib.crc32(a.id.encode()))
-        for fn in (self._survive, self._declutter, self._shelter, self._maintain, self._communal, self._progress):
+        for fn in (self._survive, self._declutter, self._abroad, self._shelter, self._maintain, self._communal,
+                   self._progress):
             for _ in range(3):  # a plan that needs something there's none of nearby is drawn again (World B tried
                 out = fn(world, a, rng)  # "gather clay" 51 times a day with no clay in reach)
                 if not (out and any(s and s.get("do") == "gather" and not s.get("_far") and a.reflex_rest.get(
@@ -338,6 +339,14 @@ class Instinct:
                         out["steps"] = (self._answer(world, a, out.get("goal", "")) + out["steps"])[:6]
                     return out
         return {"goal": "look around", "thought": "Nothing pressing. I'll wander.", "steps": [{"do": "wander"}]}
+
+    @staticmethod
+    def _abroad(world, a: Agent, rng) -> Optional[Dict[str, Any]]:
+        """A raider or trader from over the sea is here on an errand: after staying alive, that comes before making a
+        home here (raiders used to build huts in the village they came to raid, and raided days late)."""
+        if not a.origin:
+            return None
+        return VOY.abroad_plan(world, a)
 
     @staticmethod
     def _answer(world, a: Agent, goal: str) -> List[Dict[str, Any]]:

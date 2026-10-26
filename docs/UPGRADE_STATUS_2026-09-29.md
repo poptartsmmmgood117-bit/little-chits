@@ -285,6 +285,25 @@ way: four holmgangs at the stores, all won by the raiders, and four "came home i
 
 Not yet: battles between ships at sea, instinct that forages the fare or brews mead, and a run with models.
 
+## Eighth pass (2026-10-26): instinct berserkers, and raiders that raid
+
+| Piece | What it does | Tests |
+|---|---|---|
+| Readying a berserker | At war in a contact game, with a longship on the shore or out raiding (or the idea of one), one chit at a time (at most every 2 days, the same one offered it until it is done) readies itself: a red mushroom from the woods (or the stores), mead (brewed if it knows how; if nobody does, it tries 2 wild honey at a workshop, which is how mead gets discovered), and a second weapon (a spear, or a stone axe). Weight 3 minus caution, like making a needed tool. | `test_instinct_berserkers.py` |
+| Ready, even when put away | A chit counts as ready with two weapons and the fare in hand or in a stockpile near it (a busy chit stores its load). A raid waits for a ready chit; the ready one takes the fare from the stores before sailing, and eats it abroad before pillaging. | same |
+| The raid finds its ship | A longship comes home wherever it lands on the coast; raids and readying now look for it across the whole island (they looked 60 tiles out, and a beached ship 70 tiles away stopped every raid). | same |
+| Errands first abroad | A raider or trader from over the sea plans its errand right after staying alive, before making a home there. Raiders used to build huts in the village they came to raid and raided days late. | same |
+
+Mutation-checked: the errand coming first, stored fare counting, the raid waiting for its berserker, one chit readying at a time, discovering mead from honey, and the raid finding a far-off ship each fail a test when switched off.
+
+**Smoke run, twin islands at war (12 chits each, 12 days, a workshop, a longship and a stockpile placed, no fare handed out):**
+mead was discovered by trying honey at the workshop on day 1 and then taught around the village ("Watch closely:
+that's how a mead is made"); on day 5 "Yoxo ate the red mushroom and drank mead, took up a weapon in each hand, and
+a berserker's rage came over them", and on day 6 Yoxo won the holmgang at the enemy stores as a berserker. Raids went
+from 2 to 12 in the same run, because raiders now go for the stores on landing.
+
+Not yet: battles between ships at sea, and a run with models.
+
 ## What this means for the next slice
 
 In order of value:

@@ -52,6 +52,9 @@ The evidence audit of `docs/UPGRADE_PLAN.md` is in
 - **Crews and berserkers (2026-10-16, contact games):** a raiding longship carries up to 3 friends, and a chit who
   has eaten the red mushroom and drunk mead, with a weapon in each hand, fights a holmgang as a berserker. "Seventh
   pass" in the status doc; the instinct A/B is again identical on all 12 seeds.
+- **Instinct berserkers (2026-10-26, contact games at war):** one chit at a time readies itself (finds a mushroom,
+  discovers or brews mead, makes a second weapon) and the raid waits for it; raiders abroad now raid before anything
+  but survival. "Eighth pass" in the status doc.
 
 ## Codex recovery, resolved 2026-09-29 (history)
 
